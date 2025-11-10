@@ -285,6 +285,9 @@ class LiveTrader:
             is_loss = pnl < 0
             self.risk_manager.check_stop_loss(pnl, is_loss)
             
+            if not is_loss:
+                self.risk_manager.reset_consecutive_losses()
+            
             if self.position_size == 0:
                 self.dca_count = 0
                 self.bars_since_entry = 0

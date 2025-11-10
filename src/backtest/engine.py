@@ -261,6 +261,9 @@ class BacktestEngine:
         self.risk_manager.update_capital(pnl)
         is_loss = pnl < 0
         self.risk_manager.check_stop_loss(pnl, is_loss)
+        
+        if not is_loss:
+            self.risk_manager.reset_consecutive_losses()
         self.dca_tp_engine.reset_dca_state()
         self.trailing_stop_price = 0.0
         

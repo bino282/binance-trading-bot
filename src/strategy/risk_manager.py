@@ -371,3 +371,9 @@ class RiskManager:
         Get the current PnL Gate status.
         """
         return self.pnl_gate_state.status
+
+    def reset_consecutive_losses(self):
+        """
+        Reset the consecutive loss counter. Called after a profitable trade.
+        """
+        self.sl_state.consecutive_losses = 0
