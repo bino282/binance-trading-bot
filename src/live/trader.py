@@ -390,10 +390,10 @@ class LiveTrader:
             
         elif self.position_size > 0:
             # 7.1. Check Hard Stop Loss
-            should_stop_loss, sl_reason = self.risk_manager.should_stop_loss(
+            should_stop_loss_now, sl_reason = self.risk_manager.should_stop_loss(
                 current_price, self.avg_entry_price, self.position_size
             )
-            if should_stop_loss:
+            if should_stop_loss_now:
                 self.execute_sell(current_price, None, sl_reason)
                 return
             

@@ -427,15 +427,13 @@ class BacktestEngine:
                 
             elif self.position_size > 0:
                 # 7.1. Check Hard Stop Loss
-                should_stop_loss, sl_reason = self.risk_manager.should_stop_loss(
+                should_stop_loss_now, sl_reason = self.risk_manager.should_stop_loss(
                     current_price, self.avg_entry_price, self.position_size
                 )
-                if should_stop_loss:
-                    self.execute_sell(
-                        current_price, timestamp, None, reason=sl_reason
-                    )
-                    continue
-                
+                if should_stop_loss_now:
+                    self.execute_sell(current_price, timestamp, sl_reason)
+                    return
+                    
                 # 7.2. Check Signal Exit
                 if signal == 'exit':
                     self.execute_sell(

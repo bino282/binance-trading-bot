@@ -377,3 +377,36 @@ class RiskManager:
         Reset the consecutive loss counter. Called after a profitable trade.
         """
         self.sl_state.consecutive_losses = 0
+
+    def should_stop_loss(
+        self,
+        current_price: float,
+        avg_entry_price: float,
+        position_size: float
+    ) -> Tuple[bool, str]:
+        """
+        Check if the hard stop loss condition is met.
+        
+        Args:
+            current_price: Current market price
+            avg_entry_price: Average entry price of the current position
+            position_size: Current position size
+            
+        Returns:
+            Tuple of (should_stop, reason)
+        """
+        if not self.sl_enabled or position_size <= 0:
+            return False, ""
+        
+        # Calculate unrealized PnL percentage
+        unrealized_pnl_pct = (current_price - avg_entry_price) / avg_entry_price
+        
+        # Check hard stop (unrealized loss)
+        unrealized_sl_config = self.sl_config.get('unrealized_sl', {})
+        if unrealized_sl_config.get('enable', True):
+            sl_pct = unrealized_sl_config.get('sl_pct', -0.015)
+            
+            if unrealized_pnl_pct <= sl_pct:
+                return True, f"Unrealized SL: {unrealized_pnl_pct:.2%} <= {sl_pct:.2%}"
+        
+        return False, ""
