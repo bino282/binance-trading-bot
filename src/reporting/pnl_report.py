@@ -435,7 +435,17 @@ def create_markdown_report(result: BacktestResult, config: Dict, output_file: st
     else:
         sharpe_ratio = sharpe_ratio_val
     lines.append(f"| Sharpe Ratio | {sharpe_ratio:.2f} |")
-    lines.append(f"| Max Drawdown | {m['max_drawdown']:.2%} |")
+    max_drawdown_val = m.get('Max Drawdown', 0.0)
+    if isinstance(max_drawdown_val, str):
+        # Clean up Max Drawdown string if it contains '%'
+        max_drawdown_str = max_drawdown_val.replace('%', '').replace(' ', '')
+        try:
+            max_drawdown = float(max_drawdown_str) / 100
+        except ValueError:
+            max_drawdown = 0.0
+    else:
+        max_drawdown = max_drawdown_val
+    lines.append(f"| Max Drawdown | {max_drawdown:.2%} |")
     lines.append(f"| Total Fees | ${m['total_fees']:.2f} |")
     lines.append("")
     

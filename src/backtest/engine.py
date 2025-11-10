@@ -457,7 +457,7 @@ class BacktestEngine:
                     score=0.0
                 )
                 filled_orders.append(order)
-                self.logger.info(f"Order {order.order_id} FILLED at {fill_price} ({order.side} {order.type})")
+                self.logger.info(f"Order {order.order_id} FILLED at {fill_price:.4f} ({order.side} {order.type}) at bar {timestamp}")
         
         # Remove filled orders from pending list
         self.pending_orders = [order for order in self.pending_orders if order.status == 'NEW']
@@ -588,7 +588,7 @@ class BacktestEngine:
                                 current_price,
                                 timestamp,
                                 order_size=order_size,
-                                order_type='MARKET', # Immediate fill for entry signal
+                                order_type='LIMIT', # LIMIT order to be filled in future bars
                                 scenario=best_scenario.scenario_id if best_scenario else "",
                                 score=best_scenario.score if best_scenario else 0.0,
                                 reason=f"Entry signal: {best_scenario.scenario_id if best_scenario else 'N/A'}{reason_suffix}"
