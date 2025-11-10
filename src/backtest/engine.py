@@ -230,6 +230,8 @@ class BacktestEngine:
         if quantity is None:
             quantity = self.position_size
         else:
+            # Ensure quantity is a float before comparison
+            quantity = float(quantity)
             quantity = min(quantity, self.position_size)
         
         quantity = self.round_quantity(quantity)
