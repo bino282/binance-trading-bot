@@ -15,14 +15,16 @@ from ..backtest.engine import BacktestResult, Trade
 class PnLReportGenerator:
     """Generate detailed PnL reports from backtest results."""
     
-    def __init__(self, result: BacktestResult):
+    def __init__(self, result: BacktestResult, config: dict):
         """
         Initialize report generator.
         
         Args:
             result: Backtest result object
+            config: Strategy configuration dictionary
         """
         self.result = result
+        self.config = config
         self.trades = result.trades
         self.equity_curve = result.equity_curve
         self.metrics = result.metrics
@@ -164,7 +166,7 @@ class PnLReportGenerator:
         # Capital metrics
         summary.append("CAPITAL METRICS")
         summary.append("-" * 80)
-        summary.append(f"Starting Capital:        ${m['starting_capital']:,.2f}")
+        summary.append(f"Starting Capital:        ${self.config['starting_cash_usdt']:,.2f}")
         summary.append(f"Final Equity:            ${m['final_equity']:,.2f}")
         summary.append(f"Total Return:            ${m['final_equity'] - m['starting_capital']:,.2f} ({m['total_return_pct']:.2f}%)")
         summary.append(f"Max Drawdown:            {m['max_drawdown']:.2%}")

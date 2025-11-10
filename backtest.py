@@ -106,7 +106,7 @@ def main():
         return 1
         
     # Generate and save reports
-    report_gen = PnLReportGenerator(result)
+    report_gen = PnLReportGenerator(result, config.get_all())
     report_gen.print_summary()
     report_gen.save_report(str(output_dir), prefix=symbol)
     
