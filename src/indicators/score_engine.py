@@ -388,7 +388,7 @@ class ScoreEngine:
         
         # HTF alignment bonus/penalty
         if htf_data and self.bonus_penalty.get('htf_alignment'):
-            htf_config = self.bonus_penalty['htf_alignment']
+            htf_config = self.bonus_penalty.get('htf_alignment')
             
             # Check 10m and 15m alignment
             m10_trend = htf_data.get('10m', {}).get('trend')
