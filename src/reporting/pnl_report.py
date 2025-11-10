@@ -329,11 +329,11 @@ def create_markdown_report(result: BacktestResult, config: Dict, output_file: st
     # Executive Summary
     lines.append("## Executive Summary")
     lines.append("")
-    lines.append(f"- **Total Return:** {m['total_return_pct']:.2f}%")
-    lines.append(f"- **Win Rate:** {m['win_rate']:.2%}")
-    lines.append(f"- **Max Drawdown:** {m['max_drawdown']:.2%}")
-    lines.append(f"- **Sharpe Ratio:** {m['sharpe_ratio']:.2f}")
-    lines.append(f"- **Profit Factor:** {m['profit_factor']:.2f}")
+    lines.append(f"- **Total Return:** {m['Total Return']}")
+    lines.append(f"- **Win Rate:** {m['Win Rate']}")
+    lines.append(f"- **Max Drawdown:** {m['Max Drawdown']}")
+    lines.append(f"- **Sharpe Ratio:** {m['Sharpe Ratio']}")
+    lines.append(f"- **Profit Factor:** {m['Profit Factor']}")
     lines.append("")
     
     # Capital Metrics
