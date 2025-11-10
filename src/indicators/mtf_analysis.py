@@ -15,7 +15,7 @@ class MTFAnalysis:
     Analyzes trend and alignment across multiple timeframes.
     """
     
-    def __init__(self, config: ConfigLoader):
+    def __init__(self, config: dict):
         """
         Initialize MTF Analysis.
         
@@ -23,10 +23,10 @@ class MTFAnalysis:
             config: Configuration loader instance
         """
         self.config = config
-        self.mtf_cfg = config.get_mtf_config()
+        self.mtf_cfg = config.get('mtf', {})
         self.enabled = self.mtf_cfg.get('enabled', True)
         self.higher_timeframes = self.mtf_cfg.get('higher_timeframes', [])
-        self.indicators_config = config.get_indicators_config()
+        self.indicators_config = config.get('policy_cfg', {}).get('indicators', {})
     
     def get_htf_trend(self, htf_df: pd.DataFrame) -> str:
         """

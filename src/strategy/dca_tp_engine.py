@@ -34,7 +34,7 @@ class DCATPEngine:
         self.config = config
         
         # DCA config
-        self.dca_cfg = config.get_dca_config()
+        self.dca_cfg = config.get('policy_cfg', {}).get('dca', {})
         self.dca_enable = self.dca_cfg.get('enable', True)
         self.rsi_threshold_buy = self.dca_cfg.get('rsi_threshold_buy', 38)
         self.max_steps = self.dca_cfg.get('allocation_plan', {}).get('steps_max', 3)
@@ -43,13 +43,17 @@ class DCATPEngine:
         self.min_distance_pct = self.dca_cfg.get('safety_guards', {}).get('min_distance_from_last_fill_pct', 0.0055)
         
         # Trailing TP config
-        self.tp_cfg = config.get_tp_trailing_config()
+        self.tp_cfg = config.get('policy_cfg', {}).get('tp_trailing', {})
         self.tp_enable = self.tp_cfg.get('enable', True)
         self.tp_bands = self.tp_cfg.get('by_band', {})
         self.min_hold_bars = self.tp_cfg.get('min_hold_bars', 3)
         
         # State
         self.dca_state = DCAState()
+        
+    def update_trailing_tp(self, current_price: float):
+        """Placeholder for future trailing TP state update if needed."""
+        pass
     
     def reset_dca_state(self):
         """Reset DCA state after position is closed."""

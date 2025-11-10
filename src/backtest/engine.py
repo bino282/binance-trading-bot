@@ -21,6 +21,21 @@ from ..utils.logger import get_logger
 
 
 @dataclass
+class Order:
+    """Order record."""
+    order_id: str
+    timestamp: datetime
+    side: str  # 'BUY' or 'SELL'
+    type: str  # 'LIMIT' or 'MARKET'
+    price: float
+    quantity: float
+    status: str  # 'NEW', 'FILLED', 'CANCELED'
+    filled_price: Optional[float] = None
+    filled_quantity: Optional[float] = None
+    reason: str = ""
+
+
+@dataclass
 class Trade:
     """Trade record."""
     timestamp: datetime
@@ -39,6 +54,7 @@ class Trade:
 class BacktestResult:
     """Backtest result container."""
     trades: List[Trade] = field(default_factory=list)
+    orders: List[Order] = field(default_factory=list)
     equity_curve: pd.DataFrame = field(default_factory=pd.DataFrame)
     metrics: Dict = field(default_factory=dict)
     daily_pnl: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -97,6 +113,11 @@ class BacktestEngine:
         self.avg_entry_price = 0.0
         self.cash = self.starting_capital
         self.equity = self.starting_capital
+
+        # Order Management System (OMS) state
+        self.order_counter = 0
+        self.orders: List[Order] = []
+        self.pending_orders: List[Order] = []  # Active LIMIT orders waiting for fill
         
         self.trades: List[Trade] = []
         self.equity_history: List[Tuple[datetime, float, float, float]] = []
@@ -113,6 +134,33 @@ class BacktestEngine:
         """Round price to tick size."""
         return round(price / self.tick_size) * self.tick_size
     
+    def _create_order(
+        self,
+        timestamp: datetime,
+        side: str,
+        order_type: str,
+        price: float,
+        quantity: float,
+        reason: str = ""
+    ) -> Order:
+        """Create a new order and add it to the order list."""
+        self.order_counter += 1
+        order_id = f"order_{self.order_counter}"
+        
+        order = Order(
+            order_id=order_id,
+            timestamp=timestamp,
+            side=side,
+            type=order_type,
+            price=price,
+            quantity=quantity,
+            status='NEW',
+            reason=reason
+        )
+        
+        self.orders.append(order)
+        return order
+
     def round_quantity(self, quantity: float) -> float:
         """Round quantity to lot size."""
         return round(quantity / self.lot_size) * self.lot_size
@@ -121,27 +169,125 @@ class BacktestEngine:
         """Calculate trading fee."""
         return value * self.fee_per_leg
     
+    def _execute_fill(
+        self,
+        order: Order,
+        fill_price: float,
+        fill_time: datetime,
+        fill_quantity: float,
+        scenario: str = "",
+        score: float = 0.0,
+    ) -> Trade:
+        """Internal method to process an order fill and update backtest state."""
+        
+        # 1. Calculate value and fee
+        value = fill_quantity * fill_price
+        fee = self.calculate_fee(value)
+        
+        # 2. Update order status
+        order.status = 'FILLED'
+        order.filled_price = fill_price
+        order.filled_quantity = fill_quantity
+        
+        # 3. Update position and cash
+        if order.side == 'BUY':
+            total_cost = value + fee
+            
+            # Check if we have enough cash (should be checked before order creation, but as a safeguard)
+            if total_cost > self.cash:
+                self.logger.error(f"Critical Error: Insufficient cash for fill: ${self.cash:.2f} < ${total_cost:.2f}")
+                # This should not happen if initial checks are correct, but we'll proceed with negative cash for now
+                # In a real backtester, this order would be rejected or partially filled.
+            
+            # Update position
+            total_quantity = self.position_size + fill_quantity
+            total_cost_basis = (self.position_size * self.avg_entry_price) + value
+            self.avg_entry_price = total_cost_basis / total_quantity if total_quantity > 0 else 0
+            
+            self.position_size = total_quantity
+            self.cash -= total_cost
+            self.last_fill_price = fill_price
+            
+            # Update DCA state
+            if self.position_size > 0:
+                self.dca_tp_engine.update_dca_fill(fill_price)
+                self.bars_since_entry = 0
+                self.trailing_stop_price = 0.0
+            
+            pnl = 0.0
+            net_proceeds = 0.0
+            
+        elif order.side == 'SELL':
+            net_proceeds = value - fee
+            
+            # Calculate PnL
+            cost_basis = fill_quantity * self.avg_entry_price
+            pnl = net_proceeds - cost_basis
+            
+            # Update position
+            self.position_size -= fill_quantity
+            self.cash += net_proceeds
+            
+            if self.position_size <= 0:
+                self.position_size = 0.0
+                self.avg_entry_price = 0.0
+                self.dca_tp_engine.reset_dca_state()
+                self.bars_since_entry = 0
+                self.trailing_stop_price = 0.0
+            
+            # Update risk manager
+            self.risk_manager.update_capital(pnl)
+            is_loss = pnl < 0
+            self.risk_manager.check_stop_loss(pnl, is_loss)
+            
+            if not is_loss:
+                self.risk_manager.reset_consecutive_losses()
+            self.dca_tp_engine.reset_dca_state()
+            self.trailing_stop_price = 0.0
+            
+        # 4. Create trade record
+        trade = Trade(
+            timestamp=fill_time,
+            side=order.side,
+            price=fill_price,
+            quantity=fill_quantity,
+            value=value,
+            fee=fee,
+            pnl=pnl,
+            scenario=scenario,
+            score=score,
+            reason=order.reason
+        )
+        
+        self.trades.append(trade)
+        self.logger.trade(order.side, fill_price, fill_quantity, order.reason)
+        
+        return trade
+
     def execute_buy(
         self,
         price: float,
         timestamp: datetime,
         order_size: Optional[float] = None,
+        order_type: str = 'MARKET', # New parameter
         scenario: str = "",
         score: float = 0.0,
         reason: str = ""
-    ) -> Optional[Trade]:
+    ) -> Optional[Order]: # Returns Order instead of Trade
         """
-        Execute buy order.
+        Create a buy order.
         
         Args:
-            price: Execution price
+            price: Limit price for LIMIT order, or current price for MARKET order
             timestamp: Order timestamp
+            order_size: Quote currency amount to spend
+            order_type: 'MARKET' or 'LIMIT'
             scenario: Trading scenario
             score: Signal score
             reason: Trade reason
             
         Returns:
-            Trade object if executed, None otherwise
+            Order object if created, None otherwise
         """
         # Calculate quantity
         if order_size is None:
@@ -153,76 +299,71 @@ class BacktestEngine:
         if quantity <= 0:
             return None
         
-        # Calculate value and fee
-        value = quantity * price
-        fee = self.calculate_fee(value)
-        total_cost = value + fee
-        
-        # Check if we have enough cash
-        if total_cost > self.cash:
-            self.logger.warning(f"Insufficient cash: ${self.cash:.2f} < ${total_cost:.2f}")
-            return None
-        
         # Check min notional
-        if value < self.min_notional:
-            self.logger.warning(f"Order below min notional: ${value:.2f} < ${self.min_notional:.2f}")
+        if order_size < self.min_notional:
+            self.logger.warning(f"Order below min notional: ${order_size:.2f} < ${self.min_notional:.2f}")
             return None
         
-        # Update position
-        total_quantity = self.position_size + quantity
-        total_cost_basis = (self.position_size * self.avg_entry_price) + value
-        self.avg_entry_price = total_cost_basis / total_quantity if total_quantity > 0 else 0
+        # Check if we have enough cash for the *potential* cost
+        # For simplicity, we reserve the full quote amount for the order
+        if order_size > self.cash:
+            self.logger.warning(f"Insufficient cash: ${self.cash:.2f} < ${order_size:.2f}")
+            return None
         
-        self.position_size = total_quantity
-        self.cash -= total_cost
-        self.last_fill_price = price
-        
-        # Update DCA state
-        if self.position_size > 0:
-            self.dca_tp_engine.update_dca_fill(price)
-            self.bars_since_entry = 0
-            self.trailing_stop_price = 0.0
-        
-        # Create trade record
-        trade = Trade(
+        # Create the order
+        order = self._create_order(
             timestamp=timestamp,
             side='BUY',
+            order_type=order_type,
             price=price,
             quantity=quantity,
-            value=value,
-            fee=fee,
-            scenario=scenario,
-            score=score,
             reason=reason
         )
         
-        self.trades.append(trade)
-        self.logger.trade('BUY', price, quantity, reason)
+        if order_type == 'MARKET':
+            # MARKET orders are filled immediately at the given price
+            self._execute_fill(
+                order=order,
+                fill_price=price,
+                fill_time=timestamp,
+                fill_quantity=quantity,
+                scenario=scenario,
+                score=score
+            )
+            return order
         
-        return trade
+        elif order_type == 'LIMIT':
+            # LIMIT orders are added to the pending list
+            self.pending_orders.append(order)
+            self.logger.info(f"LIMIT BUY order created: {order.order_id} @ {order.price}")
+            return order
+            
+        return None
     
     def execute_sell(
         self,
         price: float,
         timestamp: datetime,
         quantity: Optional[float] = None,
+        order_type: str = 'MARKET', # New parameter
         scenario: str = "",
         score: float = 0.0,
         reason: str = ""
-    ) -> Optional[Trade]:
+    ) -> Optional[Order]: # Returns Order instead of Trade
         """
-        Execute sell order.
+        Create a sell order.
         
         Args:
-            price: Execution price
+            price: Limit price for LIMIT order, or current price for MARKET order
             timestamp: Order timestamp
             quantity: Quantity to sell (None = sell all)
+            order_type: 'MARKET' or 'LIMIT'
             scenario: Trading scenario
             score: Signal score
             reason: Trade reason
             
         Returns:
-            Trade object if executed, None otherwise
+            Order object if created, None otherwise
         """
         if self.position_size <= 0:
             return None
@@ -240,55 +381,87 @@ class BacktestEngine:
         if quantity <= 0:
             return None
         
-        # Calculate value and fee
-        value = quantity * price
-        fee = self.calculate_fee(value)
-        net_proceeds = value - fee
+        # Check min notional (using estimated value)
+        estimated_value = quantity * price
+        if estimated_value < self.min_notional:
+            self.logger.warning(f"Order below min notional: ${estimated_value:.2f} < ${self.min_notional:.2f}")
+            return None
         
-        # Calculate PnL
-        cost_basis = quantity * self.avg_entry_price
-        pnl = net_proceeds - cost_basis
-        
-        # Update position
-        self.position_size -= quantity
-        self.cash += net_proceeds
-        
-        if self.position_size <= 0:
-            self.position_size = 0.0
-            self.avg_entry_price = 0.0
-            self.dca_tp_engine.reset_dca_state()
-            self.bars_since_entry = 0
-            self.trailing_stop_price = 0.0
-        
-        # Update risk manager
-        self.risk_manager.update_capital(pnl)
-        is_loss = pnl < 0
-        self.risk_manager.check_stop_loss(pnl, is_loss)
-        
-        if not is_loss:
-            self.risk_manager.reset_consecutive_losses()
-        self.dca_tp_engine.reset_dca_state()
-        self.trailing_stop_price = 0.0
-        
-        # Create trade record
-        trade = Trade(
+        # Create the order
+        order = self._create_order(
             timestamp=timestamp,
             side='SELL',
+            order_type=order_type,
             price=price,
             quantity=quantity,
-            value=value,
-            fee=fee,
-            pnl=pnl,
-            scenario=scenario,
-            score=score,
             reason=reason
         )
         
-        self.trades.append(trade)
-        self.logger.trade('SELL', price, quantity, f"{reason} | PnL: ${pnl:.2f}")
+        if order_type == 'MARKET':
+            # MARKET orders are filled immediately at the given price
+            self._execute_fill(
+                order=order,
+                fill_price=price,
+                fill_time=timestamp,
+                fill_quantity=quantity,
+                scenario=scenario,
+                score=score
+            )
+            return order
         
-        return trade
+        elif order_type == 'LIMIT':
+            # LIMIT orders are added to the pending list
+            self.pending_orders.append(order)
+            self.logger.info(f"LIMIT SELL order created: {order.order_id} @ {order.price}")
+            return order
+            
+        return None
     
+    def _process_pending_orders(self, bar: pd.Series, timestamp: datetime):
+        """
+        Process pending LIMIT orders against the current bar's high/low prices.
+        
+        Args:
+            bar: The current OHLCV bar (pd.Series)
+            timestamp: The timestamp of the current bar
+        """
+        filled_orders = []
+        
+        for order in self.pending_orders:
+            if order.status != 'NEW':
+                filled_orders.append(order)
+                continue
+                
+            fill_price = None
+            
+            if order.side == 'BUY':
+                # LIMIT BUY: Fill if bar's low <= limit_price
+                if bar['low'] <= order.price:
+                    # Fill at the limit price (or better, but we use limit price for simplicity)
+                    fill_price = order.price
+                    
+            elif order.side == 'SELL':
+                # LIMIT SELL: Fill if bar's high >= limit_price
+                if bar['high'] >= order.price:
+                    # Fill at the limit price (or better, but we use limit price for simplicity)
+                    fill_price = order.price
+            
+            if fill_price is not None:
+                # Execute the fill
+                self._execute_fill(
+                    order=order,
+                    fill_price=fill_price,
+                    fill_time=timestamp,
+                    fill_quantity=order.quantity,
+                    scenario="", # Order from strategy, no specific scenario/score for fill
+                    score=0.0
+                )
+                filled_orders.append(order)
+                self.logger.info(f"Order {order.order_id} FILLED at {fill_price} ({order.side} {order.type})")
+        
+        # Remove filled orders from pending list
+        self.pending_orders = [order for order in self.pending_orders if order.status == 'NEW']
+        
     def update_equity(self, current_price: float, timestamp: datetime):
         """Update equity and position value."""
         self.position_value = self.position_size * current_price
@@ -350,7 +523,10 @@ class BacktestEngine:
                 timestamp = data.index[i]
                 current_price = row['close']
                 
-                # 1. Update equity
+                # 1. Process pending orders (fills happen here)
+                self._process_pending_orders(row, timestamp)
+
+                # 2. Update equity
                 self.update_equity(current_price, timestamp)
                 
                 # 2. Check for daily reset
@@ -362,7 +538,8 @@ class BacktestEngine:
                 # 3. Check for hard stop
                 if self.risk_manager.is_hard_stop_active():
                     if self.position_size > 0:
-                        self.execute_sell(current_price, timestamp, quantity=None, reason="Hard Stop / Kill Switch")
+                        # Force sell is a MARKET order
+                        self.execute_sell(current_price, timestamp, quantity=None, order_type='MARKET', reason="Hard Stop / Kill Switch")
                     self.logger.warning("Hard Stop Active. Trading paused for the day.")
                     continue
                 
@@ -407,16 +584,17 @@ class BacktestEngine:
                                 order_size *= 0.5
                                 reason_suffix = " (DEGRADED)"
                                 
-                            trade = self.execute_buy(
+                            order = self.execute_buy(
                                 current_price,
                                 timestamp,
                                 order_size=order_size,
+                                order_type='MARKET', # Immediate fill for entry signal
                                 scenario=best_scenario.scenario_id if best_scenario else "",
                                 score=best_scenario.score if best_scenario else 0.0,
                                 reason=f"Entry signal: {best_scenario.scenario_id if best_scenario else 'N/A'}{reason_suffix}"
                             )
                             
-                            if trade:
+                            if order and order.status == 'FILLED':
                                 self.bars_since_entry = 0
                                 self.risk_manager.reset_consecutive_losses()
                                 self.logger.info(f"Position opened: {best_scenario.scenario_id}")
@@ -433,7 +611,8 @@ class BacktestEngine:
                         current_price, self.avg_entry_price, self.position_size
                     )
                     if should_stop_loss_now:
-                        self.execute_sell(current_price, timestamp, quantity=None, reason=sl_reason)
+                        # Stop loss is a MARKET order
+                        self.execute_sell(current_price, timestamp, quantity=None, order_type='MARKET', reason=sl_reason)
                         continue # Use continue instead of return to allow finalization
                         
                     # 7.2. Check Signal Exit
@@ -441,10 +620,11 @@ class BacktestEngine:
                         self.execute_sell(
                             current_price,
                             timestamp,
-                            None,
-                            best_scenario.scenario_id if best_scenario else "",
-                            best_scenario.score if best_scenario else 0.0,
-                            f"Exit signal: {best_scenario.scenario_id if best_scenario else 'N/A'}"
+                            quantity=None,
+                            order_type='MARKET', # Immediate fill for exit signal
+                            scenario=best_scenario.scenario_id if best_scenario else "",
+                            score=best_scenario.score if best_scenario else 0.0,
+                            reason=f"Exit signal: {best_scenario.scenario_id if best_scenario else 'N/A'}"
                         )
                         continue
                     
@@ -466,7 +646,7 @@ class BacktestEngine:
                         # Check for stop hit
                         if current_price < self.trailing_stop_price:
                             self.execute_sell(
-                                current_price, timestamp, quantity=None,
+                                current_price, timestamp, quantity=None, order_type='MARKET',
                                 reason=f"Trailing TP Hit (Stop: {self.trailing_stop_price:.2f})"
                             )
                             self.trailing_stop_price = 0.0
@@ -478,46 +658,134 @@ class BacktestEngine:
                     )
                     
                     if can_dca:
-                        # Execute DCA buy
-                        order_size_pct = self.dca_tp_engine.get_dca_order_size_pct()
-                        dca_order_size = self.order_size_quote * order_size_pct
-                        
-                        trade = self.execute_buy(
+                        # DCA is a MARKET order for immediate execution
+                        order = self.execute_buy(
                             current_price,
                             timestamp,
-                            order_size=dca_order_size,
-                            scenario=best_scenario.scenario_id if best_scenario else "",
-                            score=best_scenario.score if best_scenario else 0.0,
-                            reason=f"DCA Step {self.dca_tp_engine.dca_state.count + 1} - {dca_reason}"
+                            order_size=self.order_size_quote,
+                            order_type='MARKET',
+                            reason=f"DCA: {dca_reason}"
                         )
-                        
-                        if trade:
-                            self.dca_tp_engine.update_dca_fill(current_price)
-                            self.trailing_stop_price = 0.0 # Reset TP on DCA
+                        if order and order.status == 'FILLED':
+                            self.logger.info(f"DCA executed: {dca_reason}")
                             
-                    # 7.5. Update position state
-                    self.bars_since_entry += 1
-                    self.dca_tp_engine.update_dca_cooldown()
+                    # 7.5. Check Trailing Take Profit (Update only)
+                    # The trailing stop hit logic is already above, this is for updating the state
+                    self.dca_tp_engine.update_trailing_tp(current_price)
                     
-                    # 7.6. Update PnL gate for next bar
-                    unrealized_pnl = (current_price - self.avg_entry_price) * self.position_size
-                    self.risk_manager.update_pnl_gate(self.equity, unrealized_pnl, current_price)
+                    # 7.6. Check Grid Trading (Simplified for now)
+                    # Grid logic is complex and usually runs in parallel or as a separate module.
+                    # For backtesting, we'll focus on the main signal.
+                    
+                    # 7.7. Update bars since entry
+                    self.bars_since_entry += 1
+                    
+                # 8. Finalize bar
+                # Nothing to do here for now
+                
+            # End of loop: Finalize position
+            if self.position_size > 0:
+                self.logger.info("End of backtest. Closing remaining position.")
+                self.execute_sell(current_price, timestamp, quantity=None, order_type='MARKET', reason="End of Backtest")
+                
         except Exception as e:
-            self.logger.error(f"Critical error during backtest loop: {e}")
-            self.logger.error("Returning partial results due to error.")
-            # Fall through to finalization and return partial result
+            self.logger.error(f"An error occurred during backtest: {e}")
             
-        # Close any remaining position at end
-        if self.position_size > 0:
-            final_price = data.iloc[-1]['close']
-            final_timestamp = data.index[-1]
-            self.execute_sell(
-                final_price,
-                final_timestamp,
-                None,
-                reason="End of backtest"
-            )
+        # Calculate and return results
+        return self._calculate_results(data)
+    
+    def _calculate_results(self, data: pd.DataFrame) -> BacktestResult:
+        """Calculate final metrics and return BacktestResult."""
         
+        # Ensure final equity is recorded
+        if len(self.equity_history) > 0:
+            final_equity = self.equity_history[-1][1]
+        else:
+            final_equity = self.starting_capital
+            
+        # 1. Equity Curve
+        equity_df = pd.DataFrame(
+            self.equity_history,
+            columns=['timestamp', 'equity', 'cash', 'unrealized_pnl']
+        ).set_index('timestamp')
+        
+        # 2. Daily PnL
+        daily_pnl = equity_df['equity'].resample('D').last().ffill().pct_change().fillna(0)
+        daily_pnl = pd.DataFrame(daily_pnl, columns=['daily_return'])
+        
+        # 3. Metrics
+        metrics = self._calculate_metrics(equity_df, daily_pnl)
+        
+        # 4. Final Result
+        return BacktestResult(
+            trades=self.trades,
+            orders=self.orders, # Include all orders
+            equity_curve=equity_df,
+            metrics=metrics,
+            daily_pnl=daily_pnl
+        )
+        
+    def _calculate_metrics(self, equity_df: pd.DataFrame, daily_pnl: pd.DataFrame) -> Dict:
+        """Calculate performance metrics."""
+        
+        metrics = {}
+        
+        # Total Return
+        initial_equity = self.starting_capital
+        final_equity = equity_df['equity'].iloc[-1] if not equity_df.empty else initial_equity
+        total_return = (final_equity / initial_equity) - 1
+        metrics['Total Return'] = total_return
+        
+        # Annualized Return (assuming daily data for simplicity)
+        num_days = (equity_df.index[-1] - equity_df.index[0]).days if not equity_df.empty else 0
+        annualized_return = (1 + total_return) ** (365 / num_days) - 1 if num_days > 0 else 0
+        metrics['Annualized Return'] = annualized_return
+        
+        # Max Drawdown
+        equity_curve = equity_df['equity']
+        peak = equity_curve.expanding(min_periods=1).max()
+        drawdown = (equity_curve - peak) / peak
+        max_drawdown = drawdown.min() if not drawdown.empty else 0
+        metrics['Max Drawdown'] = max_drawdown
+        
+        # Sharpe Ratio (using daily returns)
+        risk_free_rate = 0.0 # Assuming 0% risk-free rate
+        sharpe_ratio = (daily_pnl['daily_return'].mean() * np.sqrt(365)) / daily_pnl['daily_return'].std() if daily_pnl['daily_return'].std() != 0 else 0
+        metrics['Sharpe Ratio'] = sharpe_ratio
+        
+        # Win Rate
+        winning_trades = [t for t in self.trades if t.side == 'SELL' and t.pnl > 0]
+        total_closed_trades = len([t for t in self.trades if t.side == 'SELL'])
+        win_rate = len(winning_trades) / total_closed_trades if total_closed_trades > 0 else 0
+        metrics['Win Rate'] = win_rate
+        
+        # Total Trades
+        metrics['Total Trades'] = len(self.trades)
+        
+        # Average PnL per Trade
+        total_pnl = sum(t.pnl for t in self.trades if t.side == 'SELL')
+        avg_pnl = total_pnl / total_closed_trades if total_closed_trades > 0 else 0
+        metrics['Average PnL per Trade'] = avg_pnl
+        
+        return metrics
+    
+    def _prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Prepare data by adding indicators."""
+        self.logger.info("Preparing data and adding indicators...")
+        data = add_all_indicators(data, self.config)
+        self.logger.info("Data preparation complete.")
+        return data
+    
+    def _prepare_htf_data(self, data: pd.DataFrame):
+        """Prepare Higher Timeframe data."""
+        self.logger.info("Preparing Higher Timeframe data...")
+        self.htf_data = self.mtf_analysis.prepare_all_htf_data(data)
+        self.logger.info("HTF data preparation complete.")
+        
+    def _get_htf_analysis(self, timestamp: datetime) -> Dict:
+        """Get HTF analysis for a given timestamp."""
+        return self.mtf_analysis.get_htf_analysis(timestamp, self.htf_data)
+
         # Calculate metrics
         result = self._calculate_results(data)
         

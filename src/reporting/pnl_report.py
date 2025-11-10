@@ -26,6 +26,7 @@ class PnLReportGenerator:
         self.result = result
         self.config = config
         self.trades = result.trades
+        self.orders = result.orders # New: Order history
         self.equity_curve = result.equity_curve
         self.metrics = result.metrics
     
@@ -252,6 +253,13 @@ class PnLReportGenerator:
             trade_log_file = output_path / f"{prefix}_trades_{timestamp}.csv"
             trade_log.to_csv(trade_log_file, index=False)
             print(f"Trade log saved to: {trade_log_file}")
+            
+        # Save order history
+        if self.orders:
+            orders_df = pd.DataFrame([vars(o) for o in self.orders])
+            orders_file = output_path / f"{prefix}_orders_{timestamp}.csv"
+            orders_df.to_csv(orders_file, index=False)
+            print(f"Order history saved to: {orders_file}")
         
         # Save daily summary
         daily_summary = self.generate_daily_summary()
@@ -273,12 +281,17 @@ class PnLReportGenerator:
             self.equity_curve.to_csv(equity_file)
             print(f"Equity curve saved to: {equity_file}")
         
-        # Save metrics as JSON
+        # Save comprehensive JSON report
         import json
-        metrics_file = output_path / f"{prefix}_metrics_{timestamp}.json"
-        with open(metrics_file, 'w') as f:
-            json.dump(self.metrics, f, indent=2, default=str)
-        print(f"Metrics saved to: {metrics_file}")
+        report_data = {
+            "metrics": self.metrics,
+            "trades": [vars(t) for t in self.trades],
+            "orders": [vars(o) for o in self.orders]
+        }
+        json_file = output_path / f"{prefix}_report_{timestamp}.json"
+        with open(json_file, 'w') as f:
+            json.dump(report_data, f, indent=2, default=str)
+        print(f"Comprehensive JSON report saved to: {json_file}")
     
     def print_summary(self):
         """Print summary to console."""
@@ -329,11 +342,11 @@ def create_markdown_report(result: BacktestResult, config: Dict, output_file: st
     # Executive Summary
     lines.append("## Executive Summary")
     lines.append("")
-    lines.append(f"- **Total Return:** {m['Total Return']}")
-    lines.append(f"- **Win Rate:** {m['Win Rate']}")
-    lines.append(f"- **Max Drawdown:** {m['Max Drawdown']}")
-    lines.append(f"- **Sharpe Ratio:** {m['Sharpe Ratio']}")
-    lines.append(f"- **Profit Factor:** {m['Profit Factor']}")
+    lines.append(f"- **Total Return:** {m.get('Total Return', 'N/A')}")
+    lines.append(f"- **Win Rate:** {m.get('Win Rate', 'N/A')}")
+    lines.append(f"- **Max Drawdown:** {m.get('Max Drawdown', 'N/A')}")
+    lines.append(f"- **Sharpe Ratio:** {m.get('Sharpe Ratio', 'N/A')}")
+    lines.append(f"- **Profit Factor:** {m.get('Profit Factor', 'N/A')}")
     lines.append("")
     
     # Capital Metrics
@@ -341,11 +354,17 @@ def create_markdown_report(result: BacktestResult, config: Dict, output_file: st
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
-    lines.append(f"| Starting Capital | ${m['starting_capital']:,.2f} |")
-    lines.append(f"| Final Equity | ${m['final_equity']:,.2f} |")
-    lines.append(f"| Total Return | ${m['final_equity'] - m['starting_capital']:,.2f} |")
-    lines.append(f"| Return % | {m['total_return_pct']:.2f}% |")
-    lines.append(f"| Max Drawdown | {m['max_drawdown']:.2%} |")
+    lines.append(f"| Starting Capital | ${config['starting_cash_usdt']:,.2f} |")
+    lines.append(f"| Final Equity | {m.get('Final Equity', '$0.00')} |")
+    total_return_val = m.get('Total Return', 0.0)
+    if isinstance(total_return_val, str):
+        total_return_val = float(total_return_val.replace('%', '').replace(' ', '')) / 100
+    lines.append(f"| Total Return | {total_return_val:.2%} |")
+    lines.append(f"| Return % | {total_return_val * 100:.2f}% |")
+    max_drawdown_val = m.get('Max Drawdown', 0.0)
+    if isinstance(max_drawdown_val, str):
+        max_drawdown_val = float(max_drawdown_val.replace('%', '').replace(' ', '')) / 100
+    lines.append(f"| Max Drawdown | {max_drawdown_val:.2%} |")
     lines.append("")
     
     # Trade Statistics
@@ -353,14 +372,37 @@ def create_markdown_report(result: BacktestResult, config: Dict, output_file: st
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
-    lines.append(f"| Total Trades | {m['total_trades']} |")
-    lines.append(f"| Buy Trades | {m['buy_trades']} |")
-    lines.append(f"| Sell Trades | {m['sell_trades']} |")
-    lines.append(f"| Winning Trades | {m['winning_trades']} ({m['win_rate']:.2%}) |")
-    lines.append(f"| Losing Trades | {m['losing_trades']} |")
-    lines.append(f"| Average Win | ${m['avg_win']:.2f} |")
-    lines.append(f"| Average Loss | ${m['avg_loss']:.2f} |")
-    lines.append(f"| Profit Factor | {m['profit_factor']:.2f} |")
+    # Calculate missing trade statistics
+    buy_trades = len([t for t in result.trades if t.side == 'BUY'])
+    sell_trades = len([t for t in result.trades if t.side == 'SELL'])
+    winning_trades = len([t for t in result.trades if t.side == 'SELL' and t.pnl > 0])
+    losing_trades = len([t for t in result.trades if t.side == 'SELL' and t.pnl <= 0])
+    win_rate_val = m.get('Win Rate', 0.0)
+    if isinstance(win_rate_val, str):
+        win_rate = float(win_rate_val.replace('%', '').replace(' ', '')) / 100
+    else:
+        win_rate = win_rate_val
+    
+    lines.append(f"| Total Trades | {m.get('Total Trades', 0)} |")
+    lines.append(f"| Buy Trades | {buy_trades} |")
+    lines.append(f"| Sell Trades | {sell_trades} |")
+    lines.append(f"| Winning Trades | {winning_trades} ({win_rate * 100:.2f}%) |")
+    lines.append(f"| Losing Trades | {losing_trades} |")
+    # Calculate missing PnL statistics
+    winning_trades_list = [t for t in result.trades if t.side == 'SELL' and t.pnl > 0]
+    losing_trades_list = [t for t in result.trades if t.side == 'SELL' and t.pnl <= 0]
+    
+    total_win_pnl = sum(t.pnl for t in winning_trades_list)
+    total_loss_pnl = sum(t.pnl for t in losing_trades_list)
+    
+    avg_win = total_win_pnl / len(winning_trades_list) if winning_trades_list else 0.0
+    avg_loss = total_loss_pnl / len(losing_trades_list) if losing_trades_list else 0.0
+    
+    profit_factor = abs(total_win_pnl / total_loss_pnl) if total_loss_pnl != 0 else float('inf')
+    
+    lines.append(f"| Average Win | ${avg_win:.2f} |")
+    lines.append(f"| Average Loss | ${avg_loss:.2f} |")
+    lines.append(f"| Profit Factor | {profit_factor:.2f} |")
     lines.append("")
     
     # Scenario Performance
@@ -383,7 +425,16 @@ def create_markdown_report(result: BacktestResult, config: Dict, output_file: st
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("|--------|-------|")
-    lines.append(f"| Sharpe Ratio | {m['sharpe_ratio']:.2f} |")
+    sharpe_ratio_val = m.get('Sharpe Ratio', 0.0)
+    if isinstance(sharpe_ratio_val, str):
+        # Handle 'nan' case
+        if sharpe_ratio_val.lower() == 'nan':
+            sharpe_ratio = 0.0
+        else:
+            sharpe_ratio = float(sharpe_ratio_val.replace('%', '').replace(' ', ''))
+    else:
+        sharpe_ratio = sharpe_ratio_val
+    lines.append(f"| Sharpe Ratio | {sharpe_ratio:.2f} |")
     lines.append(f"| Max Drawdown | {m['max_drawdown']:.2%} |")
     lines.append(f"| Total Fees | ${m['total_fees']:.2f} |")
     lines.append("")

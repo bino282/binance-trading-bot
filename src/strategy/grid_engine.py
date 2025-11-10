@@ -43,14 +43,14 @@ class GridEngine:
         self.config = config
         
         # Load Spread Engine config
-        spread_cfg = config.get_spread_engine_config()
+        spread_cfg = config.get('policy_cfg', {}).get('spread_engine', {})
         self.spread_mode = spread_cfg.get('mode', 'dynamic')
         self.fixed_spread_pct = spread_cfg.get('fixed_spread_pct', 0.0034)
         self.bands = spread_cfg.get('bands', {})
         self.rsi_adjust = spread_cfg.get('rsi_adjust', {})
         
         # Load Grid config
-        grid_cfg = config.get_grid_config()
+        grid_cfg = config.get('policy_cfg', {}).get('grid', {})
         self.grid_enable = grid_cfg.get('enable', True)
         self.spacing_mode = grid_cfg.get('spacing_mode', 'use_band_median')
         self.fixed_spacing_pct = grid_cfg.get('fixed_spacing_pct', 0.0034)
