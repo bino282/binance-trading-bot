@@ -362,7 +362,7 @@ class BacktestEngine:
             # 3. Check for hard stop
             if self.risk_manager.is_hard_stop_active():
                 if self.position_size > 0:
-                    self.execute_sell(current_price, timestamp, reason="Hard Stop / Kill Switch")
+                    self.execute_sell(current_price, timestamp, quantity=None, reason="Hard Stop / Kill Switch")
                 self.logger.warning("Hard Stop Active. Trading paused for the day.")
                 continue
             
@@ -433,7 +433,7 @@ class BacktestEngine:
                     current_price, self.avg_entry_price, self.position_size
                 )
                 if should_stop_loss_now:
-                    self.execute_sell(current_price, timestamp, sl_reason)
+                    self.execute_sell(current_price, timestamp, quantity=None, reason=sl_reason)
                     return
                     
                 # 7.2. Check Signal Exit
