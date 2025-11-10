@@ -116,3 +116,39 @@ class MTFAnalysis:
             simplified[interval] = {'trend': data['trend']}
         
         return simplified
+
+    def prepare_all_htf_data(self, base_data: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+        """
+        Resample base data to all configured higher timeframes and calculate indicators.
+        
+        Args:
+            base_data: Base timeframe OHLCV data
+            
+        Returns:
+            Dictionary mapping interval to higher timeframe DataFrame with indicators
+        """
+        if not self.enabled:
+            return {}
+            
+        htf_data = {}
+        
+        for interval in self.higher_timeframes:
+            # Resample to higher timeframe
+            htf_df = base_data.resample(interval).agg({
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'volume': 'sum'
+            }).dropna()
+            
+            # Calculate indicators on the HTF data
+            htf_df = add_all_indicators(htf_df, self.indicators_config)
+            
+            # Forward fill the HTF data to align with the base timeframe index
+            # This is crucial for the backtest engine to use the last completed HTF bar
+            htf_df = htf_df.reindex(base_data.index, method='ffill')
+            
+            htf_data[interval] = htf_df
+            
+        return htf_data
