@@ -1,0 +1,22 @@
+# Binance API Keys Configuration
+# Copy this file to api_keys.yaml and fill in your credentials
+# NEVER commit api_keys.yaml to version control!
+
+binance:
+  testnet:
+    api_key: "YOUR_TESTNET_API_KEY_HERE"
+    api_secret: "YOUR_TESTNET_API_SECRET_HERE"
+  
+  mainnet:
+    api_key: "YOUR_MAINNET_API_KEY_HERE"
+    api_secret: "YOUR_MAINNET_API_SECRET_HERE"
+
+# How to get API keys:
+# 1. Testnet: https://testnet.binance.vision/
+# 2. Mainnet: https://www.binance.com/en/my/settings/api-management
+#
+# Security tips:
+# - Enable IP whitelist
+# - Enable only necessary permissions (Spot Trading)
+# - Use separate keys for testnet and mainnet
+# - Never share your API secret
