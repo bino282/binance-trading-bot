@@ -101,6 +101,10 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    if result is None:
+        logger.error("Backtest failed to produce a result object. Exiting.")
+        return 1
+        
     # Generate and save reports
     report_gen = PnLReportGenerator(result)
     report_gen.print_summary()
