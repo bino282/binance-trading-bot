@@ -309,7 +309,7 @@ class PnLReportGenerator:
         }
 
 
-def create_markdown_report(result: BacktestResult, output_file: str):
+def create_markdown_report(result: BacktestResult, config: Dict, output_file: str):
     """
     Create a comprehensive Markdown report.
     
@@ -317,7 +317,7 @@ def create_markdown_report(result: BacktestResult, output_file: str):
         result: Backtest result
         output_file: Output file path
     """
-    generator = PnLReportGenerator(result)
+    generator = PnLReportGenerator(result, config)
     m = result.metrics
     
     lines = []

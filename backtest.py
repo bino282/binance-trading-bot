@@ -114,7 +114,7 @@ def main():
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     markdown_file = output_dir / f"{symbol}_report_{timestamp}.md"
-    create_markdown_report(result, str(markdown_file))
+    create_markdown_report(result, config.get_all(), str(markdown_file))
     
     # Generate charts
     if not args.no_charts:
