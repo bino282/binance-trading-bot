@@ -167,10 +167,10 @@ class PnLReportGenerator:
         summary.append("CAPITAL METRICS")
         summary.append("-" * 80)
         summary.append(f"Starting Capital:        ${self.config['starting_cash_usdt']:,.2f}")
-        summary.append(f"Final Equity:            ${m['final_equity']:,.2f}")
-        summary.append(f"Total Return:            ${m['final_equity'] - m['starting_capital']:,.2f} ({m['total_return_pct']:.2f}%)")
-        summary.append(f"Max Drawdown:            {m['max_drawdown']:.2%}")
-        summary.append(f"Sharpe Ratio:            {m['sharpe_ratio']:.2f}")
+        summary.append(f"Final Equity:            {m['Final Equity']}")
+        summary.append(f"Total Return:            {m['Total Return']}")
+        summary.append(f"Max Drawdown:            {m['Max Drawdown']}")
+        summary.append(f"Sharpe Ratio:            {m['Sharpe Ratio']}")
         summary.append("")
         
         # Trade statistics
