@@ -359,3 +359,15 @@ class RiskManager:
             'hard_stop_triggered': self.sl_state.hard_stop_triggered,
             'kill_switch_triggered': self.sl_state.kill_switch_triggered,
         }
+
+    def is_hard_stop_active(self) -> bool:
+        """
+        Check if a hard stop condition is active (either hard stop or kill switch).
+        """
+        return self.sl_state.hard_stop_triggered or self.sl_state.kill_switch_triggered
+
+    def get_pnl_gate_status(self) -> str:
+        """
+        Get the current PnL Gate status.
+        """
+        return self.pnl_gate_state.status

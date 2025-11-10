@@ -314,15 +314,24 @@ class LiveTrader:
         position_value = self.position_size * current_price
         realized_pnl = 0.0  # Track separately in production
         
-        pnl_gate_status = self.risk_manager.update_pnl_gate(
+        self.risk_manager.update_pnl_gate(
             current_price,
             position_value,
             realized_pnl
         )
+        pnl_gate_status = self.risk_manager.get_pnl_gate_status()
         
         self.logger.info(f"PnL Gate Status: {pnl_gate_status}")
         
         # 4. Check force sell conditions (Hard Stop / Kill Switch)
+        
+        # Check for hard stop
+        if self.risk_manager.is_hard_stop_active():
+            if self.position_size > 0:
+                self.execute_sell(current_price, None, reason="Hard Stop / Kill Switch")
+            self.logger.warning("Hard Stop Active. Trading paused.")
+            return
+            
         should_force_sell, sell_qty, force_reason = self.risk_manager.should_force_sell(
             current_price,
             self.position_size
