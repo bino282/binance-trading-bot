@@ -94,13 +94,17 @@ class PnLReportGenerator:
             'equity': 'last',
             'cash': 'last',
             'unrealized_pnl': 'last',
-            'daily_pnl': 'sum',
-            'drawdown': 'min'
         })
         
+        # Calculate daily PnL and return
+        daily['daily_pnl'] = daily['equity'].diff()
         daily['daily_return_pct'] = daily['equity'].pct_change() * 100
         
-        return daily
+        # Calculate drawdown
+        peak = daily['equity'].expanding(min_periods=1).max()
+        daily['drawdown'] = (daily['equity'] - peak) / peak
+        
+        return daily.dropna(subset=['equity'])
     
     def generate_scenario_performance(self) -> pd.DataFrame:
         """
