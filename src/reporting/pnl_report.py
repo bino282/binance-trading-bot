@@ -29,6 +29,27 @@ class PnLReportGenerator:
         self.equity_curve = result.equity_curve
         self.metrics = result.metrics
     
+    def _calculate_trade_stats(self) -> dict:
+        """Calculate derived trade statistics."""
+        buy_trades = [t for t in self.trades if t.side == 'BUY']
+        sell_trades = [t for t in self.trades if t.side == 'SELL']
+        
+        total_fees = sum(t.fee for t in self.trades)
+        
+        # PnL is only calculated on SELL trades
+        pnl_trades = [t for t in self.trades if t.side == 'SELL']
+        winning_trades = [t for t in pnl_trades if t.pnl > 0]
+        losing_trades = [t for t in pnl_trades if t.pnl < 0]
+        
+        return {
+            'total_trades': len(pnl_trades),
+            'buy_trades': len(buy_trades),
+            'sell_trades': len(sell_trades),
+            'winning_trades': len(winning_trades),
+            'losing_trades': len(losing_trades),
+            'total_fees': total_fees
+        }
+
     def generate_trade_log(self) -> pd.DataFrame:
         """
         Generate detailed trade log.
@@ -176,21 +197,26 @@ class PnLReportGenerator:
         # Trade statistics
         summary.append("TRADE STATISTICS")
         summary.append("-" * 80)
-        summary.append(f"Total Trades:            {m['total_trades']}")
-        summary.append(f"Buy Trades:              {m['buy_trades']}")
-        summary.append(f"Sell Trades:             {m['sell_trades']}")
-        summary.append(f"Winning Trades:          {m['winning_trades']} ({m['win_rate']:.2%})")
-        summary.append(f"Losing Trades:           {m['losing_trades']}")
+        
+        # Calculate derived stats
+        stats = self._calculate_trade_stats()
+        
+        summary.append(f"Total Trades (Closed):   {m['Total Trades']}")
+        summary.append(f"Buy Trades:              {stats['buy_trades']}")
+        summary.append(f"Sell Trades:             {stats['sell_trades']}")
+        summary.append(f"Winning Trades:          {stats['winning_trades']} ({m['Win Rate']})")
+        summary.append(f"Losing Trades:           {stats['losing_trades']}")
         summary.append("")
         
         # PnL statistics
         summary.append("PNL STATISTICS")
         summary.append("-" * 80)
-        summary.append(f"Average Win:             ${m['avg_win']:.2f}")
-        summary.append(f"Average Loss:            ${m['avg_loss']:.2f}")
-        summary.append(f"Profit Factor:           {m['profit_factor']:.2f}")
-        summary.append(f"Total Fees:              ${m['total_fees']:.2f}")
+        summary.append(f"Average Win:             {m['Avg Win']}")
+        summary.append(f"Average Loss:            {m['Avg Loss']}")
+        summary.append(f"Profit Factor:           {m['Profit Factor']}")
+        summary.append(f"Total Fees:              ${stats['total_fees']:,.2f}")
         summary.append("")
+
         
         summary.append("=" * 80)
         
